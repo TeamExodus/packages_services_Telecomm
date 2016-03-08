@@ -794,7 +794,7 @@ public final class InCallController extends CallsManagerListenerBase {
         android.telecom.Call.Details.CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_LOCAL,
 
         Connection.CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_REMOTE,
-        android.telecom.Call.Details.CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_REMOTE
+        android.telecom.Call.Details.CAPABILITY_SUPPORTS_DOWNGRADE_TO_VOICE_REMOTE,
 
         Connection.CAPABILITY_CAN_SEND_RESPONSE_VIA_CONNECTION,
         android.telecom.Call.Details.CAPABILITY_CAN_SEND_RESPONSE_VIA_CONNECTION
