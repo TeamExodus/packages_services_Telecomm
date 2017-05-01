@@ -121,6 +121,7 @@ public class CallsManager extends Call.ListenerBase
         void onVideoStateChanged(Call call, int previousVideoState, int newVideoState);
         void onCanAddCallChanged(boolean canAddCall);
         void onSessionModifyRequestReceived(Call call, VideoProfile videoProfile);
+        void onSessionModifyRequestSent(VideoProfile fromProfile, VideoProfile toProfile);
         void onHoldToneRequested(Call call);
         void onExternalCallChanged(Call call, boolean isExternalCall);
     }
@@ -440,9 +441,13 @@ public class CallsManager extends Call.ListenerBase
 
         if (result.shouldAllowCall) {
             if (hasMaximumRingingCalls(incomingCall.getTargetPhoneAccount().getId())) {
-                Log.i(this, "onCallFilteringCompleted: Call rejected! Exceeds maximum number of " +
-                        "ringing calls.");
-                rejectCallAndLog(incomingCall);
+                if (shouldSilenceInsteadOfReject(incomingCall)) {
+                    incomingCall.silence();
+                } else {
+                    Log.i(this, "onCallFilteringCompleted: Call rejected! " +
+                            "Exceeds maximum number of ringing calls.");
+                    rejectCallAndLog(incomingCall);
+                }
             } else if (hasMaximumDialingCalls()) {
                 Log.i(this, "onCallFilteringCompleted: Call rejected! Exceeds maximum number of " +
                         "dialing calls.");
@@ -503,6 +508,37 @@ public class CallsManager extends Call.ListenerBase
 
         final int state = call.getState();
         return (state == CallState.RINGING);
+    }
+
+    /**
+     * Whether allow (silence rather than reject) the incoming call if it has a different source
+     * (connection service) from the existing ringing call when reaching maximum ringing calls.
+     */
+    private boolean shouldSilenceInsteadOfReject(Call incomingCall) {
+        if (!mContext.getResources().getBoolean(
+                R.bool.silence_incoming_when_different_service_and_maximum_ringing)) {
+            return false;
+        }
+
+        Call ringingCall = null;
+
+        for (Call call : mCalls) {
+            // Only operate on top-level calls
+            if (call.getParentCall() != null) {
+                continue;
+            }
+
+            if (call.isExternalCall()) {
+                continue;
+            }
+
+            if (CallState.RINGING == call.getState() &&
+                    call.getConnectionService() == incomingCall.getConnectionService()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     @Override
@@ -606,7 +642,8 @@ public class CallsManager extends Call.ListenerBase
     }
 
     @Override
-    public boolean onCanceledViaNewOutgoingCallBroadcast(final Call call) {
+    public boolean onCanceledViaNewOutgoingCallBroadcast(final Call call,
+            long disconnectionTimeout) {
         mPendingCallsToDisconnect.add(call);
         mHandler.postDelayed(new Runnable("CM.oCVNOCB", mLock) {
             @Override
@@ -616,7 +653,7 @@ public class CallsManager extends Call.ListenerBase
                     call.disconnect();
                 }
             }
-        }.prepare(), Timeouts.getNewOutgoingCallCancelMillis(mContext.getContentResolver()));
+        }.prepare(), disconnectionTimeout);
 
         return true;
     }
@@ -657,6 +694,22 @@ public class CallsManager extends Call.ListenerBase
 
         for (CallsManagerListener listener : mListeners) {
             listener.onSessionModifyRequestReceived(call, videoProfile);
+        }
+    }
+
+    /**
+     * Handles session modification requests sent
+     *
+     * @param fromProfile The video properties prior to the request.
+     * @param toProfile The video properties with the requested changes made.
+     */
+    @Override
+    public void onSessionModifyRequestSent(VideoProfile fromProfile, VideoProfile toProfile) {
+        Log.v(TAG, "onSessionModifyRequestSent : fromProfile = " + fromProfile +
+                " toProfile = " + toProfile);
+
+        for (CallsManagerListener listener : mListeners) {
+            listener.onSessionModifyRequestSent(fromProfile, toProfile);
         }
     }
 
@@ -1493,7 +1546,7 @@ public class CallsManager extends Call.ListenerBase
      */
     private boolean isSamePhAccIdOrSipId(String id1, String id2) {
         boolean ret = ((id1 != null && id2 != null) &&
-                (id1.equals(id2) || id1.contains("sip") || id2.contains("sip")));
+                (id1.equals(id2) || id1.contains("@") || id2.contains("@")));
         Log.d(this, "isSamePhAccIdOrSipId: id1 = " + id1 + " id2 = " + id2 + " ret = " + ret);
         return ret;
     }
@@ -2483,6 +2536,7 @@ public class CallsManager extends Call.ListenerBase
 
         setCallState(call, Call.getStateFromConnectionState(connection.getState()),
                 "existing connection");
+        call.setVideoState(connection.getVideoState());
         call.setConnectionCapabilities(connection.getConnectionCapabilities());
         call.setConnectionProperties(connection.getConnectionProperties());
         call.setCallerDisplayName(connection.getCallerDisplayName(),

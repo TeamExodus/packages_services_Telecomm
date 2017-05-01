@@ -229,6 +229,9 @@ public class CallAudioManager extends CallsManagerListenerBase {
                     makeArgsForModeStateMachine());
         }
 
+        // Turn off mute when a new incoming call is answered.
+        mute(false /* shouldMute */);
+
         maybeStopRingingAndCallWaitingForAnsweredOrRejectedCall(call);
     }
 
@@ -254,6 +257,30 @@ public class CallAudioManager extends CallsManagerListenerBase {
         if (isUpgradeRequest) {
             mPlayerFactory.createPlayer(InCallTonePlayer.TONE_VIDEO_UPGRADE).startTone();
         }
+    }
+
+    /**
+     * Handles session modification requests sent
+     *
+     * @param fromProfile The video properties prior to the request.
+     * @param toProfile The video properties with the requested changes made.
+     */
+    @Override
+    public void onSessionModifyRequestSent(VideoProfile fromProfile, VideoProfile toProfile) {
+        Log.d(LOG_TAG, "onSessionModifyRequestSent : fromProfile = " + fromProfile +
+                " toProfile = " + toProfile);
+
+        if (toProfile == null) {
+            return;
+        }
+
+        final int videoState = toProfile.getVideoState();
+
+        final int fallbackAudioRoute = VideoProfile.isVideo(videoState) ?
+                CallAudioState.ROUTE_SPEAKER : CallAudioState.ROUTE_EARPIECE;
+        mCallAudioRouteStateMachine.sendMessageWithSessionInfo(
+                        CallAudioRouteStateMachine.SET_FALLBACK_AUDIO_ROUTE_HINT,
+                        fallbackAudioRoute);
     }
 
     /**
@@ -355,12 +382,17 @@ public class CallAudioManager extends CallsManagerListenerBase {
         return null;
     }
 
+    public boolean hasAnyCalls() {
+        return mCallsManager.hasAnyCalls();
+    }
+
     void toggleMute() {
         mCallAudioRouteStateMachine.sendMessageWithSessionInfo(
                 CallAudioRouteStateMachine.TOGGLE_MUTE);
     }
 
-    void mute(boolean shouldMute) {
+    @VisibleForTesting
+    public void mute(boolean shouldMute) {
         Log.v(this, "mute, shouldMute: %b", shouldMute);
 
         // Don't mute if there are any emergency calls.
